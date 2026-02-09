@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/utils"
@@ -69,7 +71,68 @@ func (s *MessageService) SendTextMessage(userID, phone, message string) (*SendMe
 }
 
 // SendMediaMessage sends a media message with caption
-func (s *MessageService) SendMediaMessage(userID, phone, imageURL, caption string) (*SendMessageResponse, error) {
+// func (s *MessageService) SendMediaMessage(userID, phone, imageURL, caption string) (*SendMessageResponse, error) {
+// 	clientData, exists := s.waManager.GetClient(userID)
+// 	if !exists {
+// 		return nil, fmt.Errorf("WhatsApp session not found. Please initialize session first")
+// 	}
+
+// 	if clientData.GetStatus() != whatsmeow_client.StatusReady {
+// 		return nil, fmt.Errorf("WhatsApp session not ready. Current status: %s", clientData.GetStatus())
+// 	}
+
+// 	// Format phone number
+// 	jidString := utils.FormatPhoneNumber(phone)
+// 	jid, err := types.ParseJID(jidString)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("invalid phone number: %w", err)
+// 	}
+
+// 	// Download media
+// 	httpResp, err := http.Get(imageURL)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to download media: %w", err)
+// 	}
+// 	defer httpResp.Body.Close()
+
+// 	data, err := io.ReadAll(httpResp.Body)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to read media: %w", err)
+// 	}
+
+// 	// Upload media to WhatsApp
+// 	uploaded, err := clientData.Client.Upload(context.Background(), data, whatsmeow.MediaImage)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to upload media: %w", err)
+// 	}
+
+// 	// Send image message
+// 	msg := &waProto.Message{
+// 		ImageMessage: &waProto.ImageMessage{
+// 			Caption:       proto.String(caption),
+// 			URL:           proto.String(uploaded.URL),
+// 			DirectPath:    proto.String(uploaded.DirectPath),
+// 			MediaKey:      uploaded.MediaKey,
+// 			Mimetype:      proto.String(http.DetectContentType(data)),
+// 			FileEncSHA256: uploaded.FileEncSHA256,
+// 			FileSHA256:    uploaded.FileSHA256,
+// 			FileLength:    proto.Uint64(uint64(len(data))),
+// 		},
+// 	}
+
+// 	resp, err := clientData.Client.SendMessage(context.Background(), jid, msg)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to send media message: %w", err)
+// 	}
+
+// 	return &SendMessageResponse{
+// 		MessageID: resp.ID,
+// 		Timestamp: resp.Timestamp.Unix(),
+// 	}, nil
+// }
+
+// SendMediaMessage sends a media message (image/video/document) with caption
+func (s *MessageService) SendMediaMessage(userID, phone, mediaURL, caption string) (*SendMessageResponse, error) {
 	clientData, exists := s.waManager.GetClient(userID)
 	if !exists {
 		return nil, fmt.Errorf("WhatsApp session not found. Please initialize session first")
@@ -87,7 +150,7 @@ func (s *MessageService) SendMediaMessage(userID, phone, imageURL, caption strin
 	}
 
 	// Download media
-	httpResp, err := http.Get(imageURL)
+	httpResp, err := http.Get(mediaURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to download media: %w", err)
 	}
@@ -98,24 +161,80 @@ func (s *MessageService) SendMediaMessage(userID, phone, imageURL, caption strin
 		return nil, fmt.Errorf("failed to read media: %w", err)
 	}
 
+	// Detect media type from content-type header
+	mimeType := httpResp.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = http.DetectContentType(data)
+	}
+
+	// Determine media type and upload accordingly
+	var mediaType whatsmeow.MediaType
+
+	if strings.HasPrefix(mimeType, "image/") {
+		mediaType = whatsmeow.MediaImage
+	} else if strings.HasPrefix(mimeType, "video/") {
+		mediaType = whatsmeow.MediaVideo
+	} else {
+		// Default to document for everything else
+		mediaType = whatsmeow.MediaDocument
+	}
+
 	// Upload media to WhatsApp
-	uploaded, err := clientData.Client.Upload(context.Background(), data, whatsmeow.MediaImage)
+	uploaded, err := clientData.Client.Upload(context.Background(), data, mediaType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to upload media: %w", err)
 	}
 
-	// Send image message
-	msg := &waProto.Message{
-		ImageMessage: &waProto.ImageMessage{
-			Caption:       proto.String(caption),
-			URL:           proto.String(uploaded.URL),
-			DirectPath:    proto.String(uploaded.DirectPath),
-			MediaKey:      uploaded.MediaKey,
-			Mimetype:      proto.String(http.DetectContentType(data)),
-			FileEncSHA256: uploaded.FileEncSHA256,
-			FileSHA256:    uploaded.FileSHA256,
-			FileLength:    proto.Uint64(uint64(len(data))),
-		},
+	// Extract filename from URL for documents
+	filename := filepath.Base(mediaURL)
+	if idx := strings.Index(filename, "?"); idx != -1 {
+		filename = filename[:idx]
+	}
+
+	// Create appropriate message based on media type
+	var msg *waProto.Message
+
+	if strings.HasPrefix(mimeType, "image/") {
+		msg = &waProto.Message{
+			ImageMessage: &waProto.ImageMessage{
+				Caption:       proto.String(caption),
+				URL:           proto.String(uploaded.URL),
+				DirectPath:    proto.String(uploaded.DirectPath),
+				MediaKey:      uploaded.MediaKey,
+				Mimetype:      proto.String(mimeType),
+				FileEncSHA256: uploaded.FileEncSHA256,
+				FileSHA256:    uploaded.FileSHA256,
+				FileLength:    proto.Uint64(uint64(len(data))),
+			},
+		}
+	} else if strings.HasPrefix(mimeType, "video/") {
+		msg = &waProto.Message{
+			VideoMessage: &waProto.VideoMessage{
+				Caption:       proto.String(caption),
+				URL:           proto.String(uploaded.URL),
+				DirectPath:    proto.String(uploaded.DirectPath),
+				MediaKey:      uploaded.MediaKey,
+				Mimetype:      proto.String(mimeType),
+				FileEncSHA256: uploaded.FileEncSHA256,
+				FileSHA256:    uploaded.FileSHA256,
+				FileLength:    proto.Uint64(uint64(len(data))),
+			},
+		}
+	} else {
+		// Document (PDF, DOCX, etc.)
+		msg = &waProto.Message{
+			DocumentMessage: &waProto.DocumentMessage{
+				Caption:       proto.String(caption),
+				URL:           proto.String(uploaded.URL),
+				DirectPath:    proto.String(uploaded.DirectPath),
+				MediaKey:      uploaded.MediaKey,
+				Mimetype:      proto.String(mimeType),
+				FileEncSHA256: uploaded.FileEncSHA256,
+				FileSHA256:    uploaded.FileSHA256,
+				FileLength:    proto.Uint64(uint64(len(data))),
+				FileName:      proto.String(filename),
+			},
+		}
 	}
 
 	resp, err := clientData.Client.SendMessage(context.Background(), jid, msg)
@@ -192,8 +311,122 @@ func (s *MessageService) SendBulkTextMessages(userID string, phones []string, me
 	return results
 }
 
-// SendBulkMediaMessages sends media messages to multiple recipients
-func (s *MessageService) SendBulkMediaMessages(userID string, phones []string, imageURL, message string) []BulkSendResult {
+// // SendBulkMediaMessages sends media messages to multiple recipients
+// func (s *MessageService) SendBulkMediaMessages(userID string, phones []string, imageURL, message string) []BulkSendResult {
+// 	clientData, exists := s.waManager.GetClient(userID)
+// 	if !exists {
+// 		results := make([]BulkSendResult, len(phones))
+// 		for i, phone := range phones {
+// 			results[i] = BulkSendResult{
+// 				Phone:   phone,
+// 				Success: false,
+// 				Error:   "WhatsApp session not found",
+// 			}
+// 		}
+// 		return results
+// 	}
+
+// 	// Download and upload media once
+// 	httpResp, err := http.Get(imageURL)
+// 	if err != nil {
+// 		results := make([]BulkSendResult, len(phones))
+// 		for i, phone := range phones {
+// 			results[i] = BulkSendResult{
+// 				Phone:   phone,
+// 				Success: false,
+// 				Error:   fmt.Sprintf("failed to download media: %v", err),
+// 			}
+// 		}
+// 		return results
+// 	}
+// 	defer httpResp.Body.Close()
+
+// 	data, err := io.ReadAll(httpResp.Body)
+// 	if err != nil {
+// 		results := make([]BulkSendResult, len(phones))
+// 		for i, phone := range phones {
+// 			results[i] = BulkSendResult{
+// 				Phone:   phone,
+// 				Success: false,
+// 				Error:   fmt.Sprintf("failed to read media: %v", err),
+// 			}
+// 		}
+// 		return results
+// 	}
+
+// 	uploaded, err := clientData.Client.Upload(context.Background(), data, whatsmeow.MediaImage)
+// 	if err != nil {
+// 		results := make([]BulkSendResult, len(phones))
+// 		for i, phone := range phones {
+// 			results[i] = BulkSendResult{
+// 				Phone:   phone,
+// 				Success: false,
+// 				Error:   fmt.Sprintf("failed to upload media: %v", err),
+// 			}
+// 		}
+// 		return results
+// 	}
+
+// 	results := make([]BulkSendResult, len(phones))
+// 	var wg sync.WaitGroup
+// 	var mu sync.Mutex
+
+// 	for i, phone := range phones {
+// 		wg.Add(1)
+// 		go func(idx int, ph string) {
+// 			defer wg.Done()
+
+// 			jidString := utils.FormatPhoneNumber(ph)
+// 			jid, err := types.ParseJID(jidString)
+// 			if err != nil {
+// 				mu.Lock()
+// 				results[idx] = BulkSendResult{
+// 					Phone:   ph,
+// 					Success: false,
+// 					Error:   fmt.Sprintf("invalid phone number: %v", err),
+// 				}
+// 				mu.Unlock()
+// 				return
+// 			}
+
+// 			msg := &waProto.Message{
+// 				ImageMessage: &waProto.ImageMessage{
+// 					Caption:       proto.String(message),
+// 					URL:           proto.String(uploaded.URL),
+// 					DirectPath:    proto.String(uploaded.DirectPath),
+// 					MediaKey:      uploaded.MediaKey,
+// 					Mimetype:      proto.String(http.DetectContentType(data)),
+// 					FileEncSHA256: uploaded.FileEncSHA256,
+// 					FileSHA256:    uploaded.FileSHA256,
+// 					FileLength:    proto.Uint64(uint64(len(data))),
+// 				},
+// 			}
+
+// 			_, err = clientData.Client.SendMessage(context.Background(), jid, msg)
+
+// 			mu.Lock()
+// 			if err != nil {
+// 				results[idx] = BulkSendResult{
+// 					Phone:   ph,
+// 					Success: false,
+// 					Error:   err.Error(),
+// 				}
+// 			} else {
+// 				results[idx] = BulkSendResult{
+// 					Phone:   ph,
+// 					Success: true,
+// 				}
+// 			}
+// 			mu.Unlock()
+// 		}(i, phone)
+// 	}
+
+// 	wg.Wait()
+// 	return results
+// }
+
+// SendBulkMediaMessages sends media messages (image/video/document) to multiple recipients
+func (s *MessageService) SendBulkMediaMessages(userID string, phones []string, mediaURL, message string) []BulkSendResult {
 	clientData, exists := s.waManager.GetClient(userID)
 	if !exists {
 		results := make([]BulkSendResult, len(phones))
@@ -207,8 +440,8 @@ func (s *MessageService) SendBulkMediaMessages(userID string, phones []string, i
 		return results
 	}
 
-	// Download and upload media once
-	httpResp, err := http.Get(imageURL)
+	// Download media once
+	httpResp, err := http.Get(mediaURL)
 	if err != nil {
 		results := make([]BulkSendResult, len(phones))
 		for i, phone := range phones {
@@ -235,7 +468,26 @@ func (s *MessageService) SendBulkMediaMessages(userID string, phones []string, i
 		return results
 	}
 
-	uploaded, err := clientData.Client.Upload(context.Background(), data, whatsmeow.MediaImage)
+	// Detect media type from content-type header and URL
+	mimeType := httpResp.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = http.DetectContentType(data)
+	}
+
+	// Determine media type and upload accordingly
+	var mediaType whatsmeow.MediaType
+	var uploaded whatsmeow.UploadResponse
+
+	if strings.HasPrefix(mimeType, "image/") {
+		mediaType = whatsmeow.MediaImage
+	} else if strings.HasPrefix(mimeType, "video/") {
+		mediaType = whatsmeow.MediaVideo
+	} else {
+		// Default to document for everything else (PDF, DOCX, etc.)
+		mediaType = whatsmeow.MediaDocument
+	}
+
+	uploaded, err = clientData.Client.Upload(context.Background(), data, mediaType)
 	if err != nil {
 		results := make([]BulkSendResult, len(phones))
 		for i, phone := range phones {
@@ -246,6 +498,12 @@ func (s *MessageService) SendBulkMediaMessages(userID string, phones []string, i
 			}
 		}
 		return results
+	}
+
+	// Extract filename from URL for documents
+	filename := filepath.Base(mediaURL)
+	if idx := strings.Index(filename, "?"); idx != -1 {
+		filename = filename[:idx]
 	}
 
 	results := make([]BulkSendResult, len(phones))
@@ -270,17 +528,50 @@ func (s *MessageService) SendBulkMediaMessages(userID string, phones []string, i
 				return
 			}
 
-			msg := &waProto.Message{
-				ImageMessage: &waProto.ImageMessage{
-					Caption:       proto.String(message),
-					URL:           proto.String(uploaded.URL),
-					DirectPath:    proto.String(uploaded.DirectPath),
-					MediaKey:      uploaded.MediaKey,
-					Mimetype:      proto.String(http.DetectContentType(data)),
-					FileEncSHA256: uploaded.FileEncSHA256,
-					FileSHA256:    uploaded.FileSHA256,
-					FileLength:    proto.Uint64(uint64(len(data))),
-				},
+			// Create appropriate message based on media type
+			var msg *waProto.Message
+
+			if strings.HasPrefix(mimeType, "image/") {
+				msg = &waProto.Message{
+					ImageMessage: &waProto.ImageMessage{
+						Caption:       proto.String(message),
+						URL:           proto.String(uploaded.URL),
+						DirectPath:    proto.String(uploaded.DirectPath),
+						MediaKey:      uploaded.MediaKey,
+						Mimetype:      proto.String(mimeType),
+						FileEncSHA256: uploaded.FileEncSHA256,
+						FileSHA256:    uploaded.FileSHA256,
+						FileLength:    proto.Uint64(uint64(len(data))),
+					},
+				}
+			} else if strings.HasPrefix(mimeType, "video/") {
+				msg = &waProto.Message{
+					VideoMessage: &waProto.VideoMessage{
+						Caption:       proto.String(message),
+						URL:           proto.String(uploaded.URL),
+						DirectPath:    proto.String(uploaded.DirectPath),
+						MediaKey:      uploaded.MediaKey,
+						Mimetype:      proto.String(mimeType),
+						FileEncSHA256: uploaded.FileEncSHA256,
+						FileSHA256:    uploaded.FileSHA256,
+						FileLength:    proto.Uint64(uint64(len(data))),
+					},
+				}
+			} else {
+				// Document (PDF, DOCX, etc.)
+				msg = &waProto.Message{
+					DocumentMessage: &waProto.DocumentMessage{
+						Caption:       proto.String(message),
+						URL:           proto.String(uploaded.URL),
+						DirectPath:    proto.String(uploaded.DirectPath),
+						MediaKey:      uploaded.MediaKey,
+						Mimetype:      proto.String(mimeType),
+						FileEncSHA256: uploaded.FileEncSHA256,
+						FileSHA256:    uploaded.FileSHA256,
+						FileLength:    proto.Uint64(uint64(len(data))),
+						FileName:      proto.String(filename),
+					},
+				}
 			}
 
 			_, err = clientData.Client.SendMessage(context.Background(), jid, msg)

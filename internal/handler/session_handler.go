@@ -3,8 +3,9 @@ package handler
 import (
 	"fmt"
 
-	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/middleware"
+	// "github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/middleware"
 	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/service"
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/utils"
 	"github.com/cm-shreyansh/whatsapp-keepconnect-go/pkg/whatsmeow_client"
 	"github.com/gofiber/fiber/v2"
 )
@@ -23,15 +24,16 @@ func NewSessionHandler(waManager *whatsmeow_client.Manager, chatbotService *serv
 
 // InitSession initializes a new WhatsApp session
 func (h *SessionHandler) InitSession(c *fiber.Ctx) error {
-	userID := middleware.GetUserID(c)
-	if userID == 0 {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "User ID not found in token",
-		})
-	}
+	// userID := middleware.GetUserID(c)
+	userID := utils.GenerateID("user")
+	// if userID == 0 {
+	// 	return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+	// 		"error": "User ID not found in token",
+	// 	})
+	// }
 
-	userIDStr := fmt.Sprintf("%d", userID) // Convert uint to string
-	clientData, err := h.waManager.InitializeClient(userIDStr)
+	// userIDStr := fmt.Sprintf("%d", userID) // Convert uint to string
+	clientData, err := h.waManager.InitializeClient(userID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error":   "Failed to initialize session",
@@ -41,6 +43,7 @@ func (h *SessionHandler) InitSession(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"success": true,
+		"userId":  userID,
 		"message": "Session initialized. Scan QR code to authenticate.",
 		"status":  clientData.GetStatus(),
 	})
@@ -49,12 +52,15 @@ func (h *SessionHandler) InitSession(c *fiber.Ctx) error {
 // GetQRCode returns the QR code for authentication
 func (h *SessionHandler) GetQRCode(c *fiber.Ctx) error {
 	userID := c.Params("userId")
+	// fmt.Print("Found" + userID)
+	fmt.Print("CHANGEST")
+
 	if userID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "userId is required",
 		})
 	}
-
+	fmt.Print("THIS IS IT")
 	clientData, exists := h.waManager.GetClient(userID)
 	if !exists {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
@@ -88,6 +94,9 @@ func (h *SessionHandler) GetStatus(c *fiber.Ctx) error {
 	}
 
 	clientData, exists := h.waManager.GetClient(userID)
+
+	fmt.Print("~ HERE =>")
+	fmt.Sprintf("%v", exists)
 	if !exists {
 		return c.JSON(fiber.Map{
 			"status":       whatsmeow_client.StatusNotInitialized,

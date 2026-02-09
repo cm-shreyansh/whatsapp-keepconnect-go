@@ -34,10 +34,10 @@ func main() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// Run migrations
-	if err := database.AutoMigrate(db); err != nil {
-		log.Fatalf("Failed to migrate database: %v", err)
-	}
+	// // Run migrations
+	// if err := database.AutoMigrate(db); err != nil {
+	// 	log.Fatalf("Failed to migrate database: %v", err)
+	// }
 
 	// Initialize repositories
 	userRepo := repository.NewUserRepository(db)
@@ -53,6 +53,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize WhatsApp manager: %v", err)
 	}
+
+	// Start periodic metadata saving (every 5 minutes)
+	waManager.StartMetadataSaver(5 * time.Minute)
 
 	// Update chatbot service with the WhatsApp manager
 	chatbotService = service.NewChatbotService(chatbotRepo, optionRepo, conversationRepo, userRepo, waManager)
@@ -153,6 +156,11 @@ func main() {
 	go func() {
 		<-c
 		log.Println("\n🛑 Shutting down gracefully...")
+
+		// Save session metadata before shutdown
+		if err := waManager.SaveSessionMetadata(); err != nil {
+			log.Printf("Error saving session metadata on shutdown: %v", err)
+		}
 		app.Shutdown()
 	}()
 
