@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "3456:3456"
+    environment:
+      - PORT=3456
+      - ENV=production
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=whatsapp_user
+      - DB_PASSWORD=whatsapp_password
+      - DB_NAME=whatsapp_chatbot
+      - JWT_SECRET=change-this-secret-key-in-production
+      - WHATSMEOW_DB_PATH=/root/sessions/whatsmeow.db
+      - SESSION_METADATA_PATH=/root/sessions/metadata.json
+    volumes:
+      - ./sessions:/root/sessions
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=root_password
+      - MYSQL_DATABASE=whatsapp_chatbot
+      - MYSQL_USER=whatsapp_user
+      - MYSQL_PASSWORD=whatsapp_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
