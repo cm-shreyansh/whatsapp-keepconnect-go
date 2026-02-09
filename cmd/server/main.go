@@ -6,18 +6,19 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/config"
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/database"
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/handler"
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/middleware"
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/repository"
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/service"
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/pkg/whatsmeow_client"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
-	"github.com/yourusername/whatsapp-chatbot-go/internal/config"
-	"github.com/yourusername/whatsapp-chatbot-go/internal/database"
-	"github.com/yourusername/whatsapp-chatbot-go/internal/handler"
-	"github.com/yourusername/whatsapp-chatbot-go/internal/middleware"
-	"github.com/yourusername/whatsapp-chatbot-go/internal/repository"
-	"github.com/yourusername/whatsapp-chatbot-go/internal/service"
-	"github.com/yourusername/whatsapp-chatbot-go/pkg/whatsmeow_client"
 )
 
 func main() {
@@ -46,7 +47,7 @@ func main() {
 
 	// Initialize services (temporary placeholders for WhatsApp manager)
 	chatbotService := service.NewChatbotService(chatbotRepo, optionRepo, conversationRepo, userRepo, nil)
-	
+
 	// Initialize WhatsApp manager with chatbot service as event handler
 	waManager, err := whatsmeow_client.NewManager(cfg.WhatsApp.DBPath, chatbotService)
 	if err != nil {
@@ -87,7 +88,7 @@ func main() {
 	app.Get("/api/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"status":    "ok",
-			"timestamp": fiber.Now(),
+			"timestamp": time.Now(),
 		})
 	})
 

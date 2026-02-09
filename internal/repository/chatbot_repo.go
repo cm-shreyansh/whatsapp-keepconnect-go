@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"github.com/yourusername/whatsapp-chatbot-go/internal/domain"
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/domain"
 	"gorm.io/gorm"
 )
 

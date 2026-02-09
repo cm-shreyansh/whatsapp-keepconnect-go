@@ -4,9 +4,9 @@ import (
 	"fmt"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/yourusername/whatsapp-chatbot-go/internal/middleware"
-	"github.com/yourusername/whatsapp-chatbot-go/internal/service"
-	"github.com/yourusername/whatsapp-chatbot-go/internal/utils"
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/middleware"
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/service"
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/utils"
 )
 
 type MessageHandler struct {

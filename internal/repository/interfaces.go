@@ -1,6 +1,6 @@
 package repository
 
-import "github.com/yourusername/whatsapp-chatbot-go/internal/domain"
+import "github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/domain"
 
 // UserRepository defines the interface for user data operations
 type UserRepository interface {

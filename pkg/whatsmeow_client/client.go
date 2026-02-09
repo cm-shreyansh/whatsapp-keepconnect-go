@@ -14,6 +14,7 @@ import (
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
 	"gorm.io/driver/sqlite"
@@ -23,21 +24,49 @@ import (
 type SessionStatus string
 
 const (
-	StatusInitializing    SessionStatus = "initializing"
-	StatusQRReady         SessionStatus = "qr_ready"
-	StatusAuthenticated   SessionStatus = "authenticated"
-	StatusReady           SessionStatus = "ready"
-	StatusAuthFailed      SessionStatus = "auth_failed"
-	StatusDisconnected    SessionStatus = "disconnected"
-	StatusNotInitialized  SessionStatus = "not_initialized"
+	StatusInitializing   SessionStatus = "initializing"
+	StatusQRReady        SessionStatus = "qr_ready"
+	StatusAuthenticated  SessionStatus = "authenticated"
+	StatusReady          SessionStatus = "ready"
+	StatusAuthFailed     SessionStatus = "auth_failed"
+	StatusDisconnected   SessionStatus = "disconnected"
+	StatusNotInitialized SessionStatus = "not_initialized"
 )
 
 type ClientData struct {
 	Client    *whatsmeow.Client
-	Status    SessionStatus
-	QRCode    string
+	status    SessionStatus
+	qrCode    string
 	Container *sqlstore.Container
 	mu        sync.RWMutex
+}
+
+// GetStatus safely returns the current status
+func (cd *ClientData) GetStatus() SessionStatus {
+	cd.mu.RLock()
+	defer cd.mu.RUnlock()
+	return cd.status
+}
+
+// SetStatus safely sets the status
+func (cd *ClientData) SetStatus(status SessionStatus) {
+	cd.mu.Lock()
+	defer cd.mu.Unlock()
+	cd.status = status
+}
+
+// GetQRCode safely returns the QR code
+func (cd *ClientData) GetQRCode() string {
+	cd.mu.RLock()
+	defer cd.mu.RUnlock()
+	return cd.qrCode
+}
+
+// SetQRCode safely sets the QR code
+func (cd *ClientData) SetQRCode(qr string) {
+	cd.mu.Lock()
+	defer cd.mu.Unlock()
+	cd.qrCode = qr
 }
 
 type Manager struct {
@@ -70,7 +99,7 @@ func NewManager(dbPath string, handler EventHandler) (*Manager, error) {
 
 	// Create store container
 	container := sqlstore.NewWithDB(sqlDB, "sqlite3", waLog.Noop)
-	if err := container.Upgrade(); err != nil {
+	if err := container.Upgrade(context.Background()); err != nil {
 		return nil, fmt.Errorf("failed to upgrade store: %w", err)
 	}
 
@@ -91,7 +120,7 @@ func (m *Manager) GetOrCreateClient(userID string) (*ClientData, error) {
 	}
 
 	// Get device from store
-	device, err := m.container.GetFirstDevice()
+	device, err := m.container.GetFirstDevice(context.Background())
 	if err != nil {
 		// Create new device if none exists
 		device = m.container.NewDevice()
@@ -102,9 +131,9 @@ func (m *Manager) GetOrCreateClient(userID string) (*ClientData, error) {
 
 	clientData := &ClientData{
 		Client:    client,
-		Status:    StatusInitializing,
 		Container: m.container,
 	}
+	clientData.SetStatus(StatusInitializing)
 
 	// Set up event handlers
 	m.setupEventHandlers(userID, clientData)
@@ -119,20 +148,14 @@ func (m *Manager) setupEventHandlers(userID string, clientData *ClientData) {
 
 	client.AddEventHandler(func(evt interface{}) {
 		switch v := evt.(type) {
-		case *whatsmeow.LoggedOut:
-			clientData.mu.Lock()
-			clientData.Status = StatusDisconnected
-			clientData.mu.Unlock()
+		case *events.LoggedOut:
+			clientData.SetStatus(StatusDisconnected)
 
-		case *whatsmeow.Connected:
-			clientData.mu.Lock()
-			clientData.Status = StatusReady
-			clientData.mu.Unlock()
+		case *events.Connected:
+			clientData.SetStatus(StatusReady)
 
-		case *whatsmeow.Disconnected:
-			clientData.mu.Lock()
-			clientData.Status = StatusDisconnected
-			clientData.mu.Unlock()
+		case *events.Disconnected:
+			clientData.SetStatus(StatusDisconnected)
 
 		default:
 			// Pass message events to the event handler
@@ -175,15 +198,11 @@ func (m *Manager) InitializeClient(userID string) (*ClientData, error) {
 					base64Str := base64.StdEncoding.EncodeToString(png)
 					qrDataURL := "data:image/png;base64," + base64Str
 
-					clientData.mu.Lock()
-					clientData.QRCode = qrDataURL
-					clientData.Status = StatusQRReady
-					clientData.mu.Unlock()
+					clientData.SetQRCode(qrDataURL)
+					clientData.SetStatus(StatusQRReady)
 				} else {
 					// QR code scanned or error
-					clientData.mu.Lock()
-					clientData.Status = StatusAuthenticated
-					clientData.mu.Unlock()
+					clientData.SetStatus(StatusAuthenticated)
 				}
 			}
 		}()
@@ -192,9 +211,7 @@ func (m *Manager) InitializeClient(userID string) (*ClientData, error) {
 		if err := clientData.Client.Connect(); err != nil {
 			return nil, fmt.Errorf("failed to connect: %w", err)
 		}
-		clientData.mu.Lock()
-		clientData.Status = StatusReady
-		clientData.mu.Unlock()
+		clientData.SetStatus(StatusReady)
 	}
 
 	return clientData, nil
@@ -216,7 +233,7 @@ func (m *Manager) LogoutClient(userID string) error {
 		return fmt.Errorf("client not found")
 	}
 
-	if err := clientData.Client.Logout(); err != nil {
+	if err := clientData.Client.Logout(context.Background()); err != nil {
 		return err
 	}
 
@@ -232,13 +249,12 @@ func (m *Manager) GetAllSessions() []map[string]interface{} {
 
 	sessions := make([]map[string]interface{}, 0, len(m.clients))
 	for userID, clientData := range m.clients {
-		clientData.mu.RLock()
+		status := clientData.GetStatus()
 		sessions = append(sessions, map[string]interface{}{
 			"user_id":      userID,
-			"status":       clientData.Status,
-			"is_logged_in": clientData.Status == StatusReady,
+			"status":       status,
+			"is_logged_in": status == StatusReady,
 		})
-		clientData.mu.RUnlock()
 	}
 
 	return sessions

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/yourusername/whatsapp-chatbot-go/internal/config"
-	"github.com/yourusername/whatsapp-chatbot-go/internal/domain"
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/config"
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/domain"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"

@@ -2,11 +2,11 @@ package handler
 
 import (
 	"fmt"
-	
+
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/middleware"
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/service"
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/pkg/whatsmeow_client"
 	"github.com/gofiber/fiber/v2"
-	"github.com/yourusername/whatsapp-chatbot-go/internal/middleware"
-	"github.com/yourusername/whatsapp-chatbot-go/internal/service"
-	"github.com/yourusername/whatsapp-chatbot-go/pkg/whatsmeow_client"
 )
 
 type SessionHandler struct {
@@ -42,7 +42,7 @@ func (h *SessionHandler) InitSession(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"message": "Session initialized. Scan QR code to authenticate.",
-		"status":  clientData.Status,
+		"status":  clientData.GetStatus(),
 	})
 }
 
@@ -62,10 +62,8 @@ func (h *SessionHandler) GetQRCode(c *fiber.Ctx) error {
 		})
 	}
 
-	clientData.mu.RLock()
-	qrCode := clientData.QRCode
-	status := clientData.Status
-	clientData.mu.RUnlock()
+	qrCode := clientData.GetQRCode()
+	status := clientData.GetStatus()
 
 	if qrCode == "" || qrCode == "undefined" {
 		return c.JSON(fiber.Map{
@@ -98,9 +96,7 @@ func (h *SessionHandler) GetStatus(c *fiber.Ctx) error {
 		})
 	}
 
-	clientData.mu.RLock()
-	status := clientData.Status
-	clientData.mu.RUnlock()
+	status := clientData.GetStatus()
 
 	return c.JSON(fiber.Map{
 		"status":       status,

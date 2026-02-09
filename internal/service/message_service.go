@@ -7,8 +7,9 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/yourusername/whatsapp-chatbot-go/internal/utils"
-	"github.com/yourusername/whatsapp-chatbot-go/pkg/whatsmeow_client"
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/utils"
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/pkg/whatsmeow_client"
+	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
@@ -42,8 +43,8 @@ func (s *MessageService) SendTextMessage(userID, phone, message string) (*SendMe
 		return nil, fmt.Errorf("WhatsApp session not found. Please initialize session first")
 	}
 
-	if clientData.Status != whatsmeow_client.StatusReady {
-		return nil, fmt.Errorf("WhatsApp session not ready. Current status: %s", clientData.Status)
+	if clientData.GetStatus() != whatsmeow_client.StatusReady {
+		return nil, fmt.Errorf("WhatsApp session not ready. Current status: %s", clientData.GetStatus())
 	}
 
 	// Format phone number
@@ -74,8 +75,8 @@ func (s *MessageService) SendMediaMessage(userID, phone, imageURL, caption strin
 		return nil, fmt.Errorf("WhatsApp session not found. Please initialize session first")
 	}
 
-	if clientData.Status != whatsmeow_client.StatusReady {
-		return nil, fmt.Errorf("WhatsApp session not ready. Current status: %s", clientData.Status)
+	if clientData.GetStatus() != whatsmeow_client.StatusReady {
+		return nil, fmt.Errorf("WhatsApp session not ready. Current status: %s", clientData.GetStatus())
 	}
 
 	// Format phone number
