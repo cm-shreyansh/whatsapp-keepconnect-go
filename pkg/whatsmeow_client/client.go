@@ -42,8 +42,30 @@ type ClientData struct {
 	Client    *whatsmeow.Client
 	status    SessionStatus
 	qrCode    string
+	qrChan    <-chan whatsmeow.QRChannelItem // Add this
+	qrCtx     context.Context                // Add this
+	qrCancel  context.CancelFunc             // Add this
 	Container *sqlstore.Container
 	mu        sync.RWMutex
+}
+
+// Add getter for QR channel status
+func (cd *ClientData) IsQRChannelActive() bool {
+	cd.mu.RLock()
+	defer cd.mu.RUnlock()
+	return cd.qrChan != nil && cd.qrCtx != nil
+}
+
+// Add method to close QR channel
+func (cd *ClientData) CloseQRChannel() {
+	cd.mu.Lock()
+	defer cd.mu.Unlock()
+
+	if cd.qrCancel != nil {
+		cd.qrCancel()
+		cd.qrCancel = nil
+	}
+	cd.qrChan = nil
 }
 
 // GetStatus safely returns the current status
@@ -61,14 +83,65 @@ func (cd *ClientData) SetStatus(status SessionStatus) {
 }
 
 // GetQRCode safely returns the QR code
+// GetQRCode safely returns the QR code
 func (cd *ClientData) GetQRCode() string {
 	cd.mu.RLock()
 	defer cd.mu.RUnlock()
 	return cd.qrCode
 }
 
+// func (cd *ClientData) GetQRCode() string {
+// 	cd.mu.RLock()
+// 	defer cd.mu.RUnlock()
+// 	if cd.Client.Store.ID == nil {
+// 		// Not logged in, generate QR code
+// 		qrChan, err := cd.Client.GetQRChannel(context.Background())
+// 		if err != nil {
+// 			return ""
+// 		}
+
+// 		// Connect to WhatsApp
+// 		if err := cd.Client.Connect(); err != nil {
+// 			return ""
+// 		}
+
+// 		// Wait for QR code
+// 		go func() {
+// 			for evt := range qrChan {
+// 				if evt.Event == "code" {
+// 					// Generate QR code as base64 data URL
+// 					fmt.Print("Event triggered Dude")
+// 					png, err := qrcode.Encode(evt.Code, qrcode.Medium, 256)
+// 					if err != nil {
+// 						fmt.Printf("Failed to generate QR code: %v\n", err)
+// 						continue
+// 					}
+
+// 					base64Str := base64.StdEncoding.EncodeToString(png)
+// 					qrDataURL := "data:image/png;base64," + base64Str
+
+// 					cd.SetQRCode(qrDataURL)
+// 					cd.SetStatus(StatusQRReady)
+// 				} else {
+// 					// QR code scanned or error
+// 					cd.SetStatus(StatusAuthenticated)
+// 				}
+// 			}
+// 		}()
+// 	} else {
+// 		// Already logged in, just connect
+// 		if err := cd.Client.Connect(); err != nil {
+// 			return ""
+// 		}
+// 		cd.SetStatus(StatusReady)
+// 	}
+
+// 	return cd.qrCode
+// }
+
 // SetQRCode safely sets the QR code
 func (cd *ClientData) SetQRCode(qr string) {
+	fmt.Print("~ Setting QR Code")
 	cd.mu.Lock()
 	defer cd.mu.Unlock()
 	cd.qrCode = qr
@@ -157,29 +230,29 @@ func NewManager(dbPath string, handler EventHandler) (*Manager, error) {
 }
 
 func (m *Manager) GetOrCreateClient(userID string) (*ClientData, error) {
-	fmt.Print("HERE I AM")
+	// fmt.Print("HERE I AM")
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// Check if client already exists
 	foundClientData, exists := m.clients[userID]
-	fmt.Print(foundClientData)
+	// fmt.Print(foundClientData)
 	if exists {
-		fmt.Sprint("%v", exists)
+		// fmt.Sprint("%v", exists)
 		return foundClientData, nil
 	}
 
 	// Get device from store
-	device, err := m.container.GetFirstDevice(context.Background())
-	if err != nil {
-		// Create new device if none exists
-		device = m.container.NewDevice()
-	}
+	// device, err := m.container.GetFirstDevice(context.Background())
+	// if err != nil {
+	// Create new device if none exists
+	// }
 
+	device := m.container.NewDevice()
 	// Create WhatsApp client
 	client := whatsmeow.NewClient(device, waLog.Noop)
 
-	fmt.Print("HERE WE ARE")
+	// fmt.Print("HERE WE ARE")
 	fmt.Print(client.IsLoggedIn())
 	fmt.Print(client.IsConnected())
 	clientData := &ClientData{
@@ -224,56 +297,204 @@ func (m *Manager) setupEventHandlers(userID string, clientData *ClientData) {
 	})
 }
 
+// func (m *Manager) InitializeClient(userID string) (*ClientData, error) {
+// 	clientData, err := m.GetOrCreateClient(userID)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	if clientData.Client.Store.ID == nil {
+// 		// Not logged in, generate QR code
+// 		qrChan, err := clientData.Client.GetQRChannel(context.Background())
+// 		if err != nil {
+// 			return nil, fmt.Errorf("failed to get QR channel: %w", err)
+// 		}
+
+// 		// Connect to WhatsApp
+// 		if err := clientData.Client.Connect(); err != nil {
+// 			return nil, fmt.Errorf("failed to connect: %w", err)
+// 		}
+
+// 		// Wait for QR code
+// 		go func() {
+// 			for evt := range qrChan {
+// 				if evt.Event == "code" {
+// 					// Generate QR code as base64 data URL
+// 					fmt.Print("Event triggered Dude")
+// 					png, err := qrcode.Encode(evt.Code, qrcode.Medium, 256)
+// 					if err != nil {
+// 						fmt.Printf("Failed to generate QR code: %v\n", err)
+// 						continue
+// 					}
+
+// 					base64Str := base64.StdEncoding.EncodeToString(png)
+// 					qrDataURL := "data:image/png;base64," + base64Str
+
+// 					clientData.SetQRCode(qrDataURL)
+// 					clientData.SetStatus(StatusQRReady)
+// 				} else {
+// 					// QR code scanned or error
+// 					clientData.SetStatus(StatusAuthenticated)
+// 				}
+// 			}
+// 		}()
+// 	} else {
+// 		// Already logged in, just connect
+// 		if err := clientData.Client.Connect(); err != nil {
+// 			return nil, fmt.Errorf("failed to connect: %w", err)
+// 		}
+// 		clientData.SetStatus(StatusReady)
+// 	}
+
+// 	return clientData, nil
+// }
+
 func (m *Manager) InitializeClient(userID string) (*ClientData, error) {
-	fmt.Print("HERE I AM")
-	clientData, err := m.GetOrCreateClient(userID)
-	if err != nil {
-		return nil, err
+	m.mu.Lock()
+	clientData, exists := m.clients[userID]
+	m.mu.Unlock()
+
+	// If client exists and is already ready, return it
+	if exists && clientData.GetStatus() == StatusReady {
+		return clientData, nil
 	}
 
-	if clientData.Client.Store.ID == nil {
-		// Not logged in, generate QR code
-		qrChan, err := clientData.Client.GetQRChannel(context.Background())
+	// If client exists but waiting for QR, return existing
+	if exists && clientData.IsQRChannelActive() {
+		log.Printf("QR channel already active for user %s", userID)
+		return clientData, nil
+	}
+
+	// Create new client if doesn't exist
+	if !exists {
+		var err error
+		clientData, err = m.GetOrCreateClient(userID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get QR channel: %w", err)
+			return nil, err
 		}
+	}
 
-		// Connect to WhatsApp
-		if err := clientData.Client.Connect(); err != nil {
-			return nil, fmt.Errorf("failed to connect: %w", err)
-		}
-
-		// Wait for QR code
-		go func() {
-			for evt := range qrChan {
-				if evt.Event == "code" {
-					// Generate QR code as base64 data URL
-					png, err := qrcode.Encode(evt.Code, qrcode.Medium, 256)
-					if err != nil {
-						fmt.Printf("Failed to generate QR code: %v\n", err)
-						continue
-					}
-
-					base64Str := base64.StdEncoding.EncodeToString(png)
-					qrDataURL := "data:image/png;base64," + base64Str
-
-					clientData.SetQRCode(qrDataURL)
-					clientData.SetStatus(StatusQRReady)
-				} else {
-					// QR code scanned or error
-					clientData.SetStatus(StatusAuthenticated)
-				}
-			}
-		}()
-	} else {
-		// Already logged in, just connect
+	// Check if already logged in
+	if clientData.Client.Store.ID != nil {
+		log.Printf("User %s already authenticated, reconnecting...", userID)
 		if err := clientData.Client.Connect(); err != nil {
 			return nil, fmt.Errorf("failed to connect: %w", err)
 		}
 		clientData.SetStatus(StatusReady)
+		return clientData, nil
 	}
 
+	// Not logged in, need QR code
+	return m.startQRFlow(userID, clientData)
+}
+
+// Separate method for QR flow
+func (m *Manager) startQRFlow(userID string, clientData *ClientData) (*ClientData, error) {
+	// Create cancellable context for QR channel
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Get QR channel
+	qrChan, err := clientData.Client.GetQRChannel(ctx)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to get QR channel: %w", err)
+	}
+
+	// Store QR channel and context
+	clientData.mu.Lock()
+	clientData.qrChan = qrChan
+	clientData.qrCtx = ctx
+	clientData.qrCancel = cancel
+	clientData.mu.Unlock()
+
+	// Connect to WhatsApp
+	if err := clientData.Client.Connect(); err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to connect: %w", err)
+	}
+
+	// Start QR code listener in a goroutine
+	go m.handleQREvents(userID, clientData, qrChan)
+
+	log.Printf("QR flow started for user %s", userID)
 	return clientData, nil
+}
+
+// Dedicated QR event handler
+func (m *Manager) handleQREvents(userID string, clientData *ClientData, qrChan <-chan whatsmeow.QRChannelItem) {
+	defer func() {
+		log.Printf("QR channel closed for user %s", userID)
+		clientData.CloseQRChannel()
+	}()
+
+	qrCount := 0
+	for evt := range qrChan {
+		switch evt.Event {
+		case "code":
+			qrCount++
+			log.Printf("📱 QR code #%d generated for user %s (expires in ~60s)", qrCount, userID)
+
+			// Generate QR code as base64 data URL
+			png, err := qrcode.Encode(evt.Code, qrcode.Medium, 256)
+			if err != nil {
+				log.Printf("Failed to generate QR code for %s: %v", userID, err)
+				continue
+			}
+
+			base64Str := base64.StdEncoding.EncodeToString(png)
+			qrDataURL := "data:image/png;base64," + base64Str
+
+			clientData.SetQRCode(qrDataURL)
+			clientData.SetStatus(StatusQRReady)
+
+			log.Printf("✅ QR code updated for user %s", userID)
+
+		case "success":
+			log.Printf("🎉 QR code scanned successfully for user %s", userID)
+			clientData.SetStatus(StatusAuthenticated)
+			clientData.SetQRCode("") // Clear QR code
+
+		case "timeout":
+			log.Printf("⏰ QR code timeout for user %s after %d attempts", userID, qrCount)
+			clientData.SetStatus(StatusAuthFailed)
+			clientData.SetQRCode("") // Clear QR code
+
+		case "error":
+			log.Printf("❌ QR code error for user %s: %v", userID, evt.Error)
+			clientData.SetStatus(StatusAuthFailed)
+			clientData.SetQRCode("") // Clear QR code
+		}
+	}
+}
+
+// RegenerateQR restarts the QR flow for a user
+func (m *Manager) RegenerateQR(userID string) error {
+	m.mu.Lock()
+	clientData, exists := m.clients[userID]
+	m.mu.Unlock()
+
+	if !exists {
+		return fmt.Errorf("client not found for user %s", userID)
+	}
+
+	// Close existing QR channel if active
+	if clientData.IsQRChannelActive() {
+		log.Printf("Closing existing QR channel for user %s", userID)
+		clientData.CloseQRChannel()
+	}
+
+	// Disconnect if connected
+	if clientData.Client.IsConnected() {
+		clientData.Client.Disconnect()
+	}
+
+	// Wait a bit for cleanup
+	time.Sleep(500 * time.Millisecond)
+
+	// Restart QR flow
+	log.Printf("Restarting QR flow for user %s", userID)
+	_, err := m.startQRFlow(userID, clientData)
+	return err
 }
 
 func (m *Manager) GetClient(userID string) (*ClientData, bool) {
@@ -285,6 +506,36 @@ func (m *Manager) GetClient(userID string) (*ClientData, bool) {
 	return clientData, exists
 }
 
+// func (m *Manager) LogoutClient(userID string) error {
+// 	m.mu.Lock()
+// 	defer m.mu.Unlock()
+
+// 	clientData, exists := m.clients[userID]
+// 	if !exists {
+// 		return fmt.Errorf("client not found")
+// 	}
+
+// 	// 1. Logout from WhatsApp (deletes device from WhatsApp servers)
+// 	if err := clientData.Client.Logout(context.Background()); err != nil {
+// 		log.Printf("Warning: logout error for %s: %v", userID, err)
+// 		// Continue cleanup even if logout fails
+// 	}
+
+// 	// 2. Disconnect the client
+// 	clientData.Client.Disconnect()
+
+// 	// 3. Remove from memory
+// 	delete(m.clients, userID)
+
+// 	// 4. Update metadata file
+// 	if err := m.SaveSessionMetadata(); err != nil {
+// 		log.Printf("Warning: failed to save metadata after logout: %v", err)
+// 	}
+
+// 	log.Printf("✅ Session cleaned up for user %s", userID)
+// 	return nil
+// }
+
 func (m *Manager) LogoutClient(userID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -294,19 +545,23 @@ func (m *Manager) LogoutClient(userID string) error {
 		return fmt.Errorf("client not found")
 	}
 
-	// 1. Logout from WhatsApp (deletes device from WhatsApp servers)
-	if err := clientData.Client.Logout(context.Background()); err != nil {
-		log.Printf("Warning: logout error for %s: %v", userID, err)
-		// Continue cleanup even if logout fails
+	// Close QR channel if active
+	if clientData.IsQRChannelActive() {
+		clientData.CloseQRChannel()
 	}
 
-	// 2. Disconnect the client
+	// Logout from WhatsApp (deletes device from WhatsApp servers)
+	if err := clientData.Client.Logout(context.Background()); err != nil {
+		log.Printf("Warning: logout error for %s: %v", userID, err)
+	}
+
+	// Disconnect the client
 	clientData.Client.Disconnect()
 
-	// 3. Remove from memory
+	// Remove from memory
 	delete(m.clients, userID)
 
-	// 4. Update metadata file
+	// Update metadata file
 	if err := m.SaveSessionMetadata(); err != nil {
 		log.Printf("Warning: failed to save metadata after logout: %v", err)
 	}
@@ -450,6 +705,7 @@ func loadSessionMetadata() ([]SessionMetadata, error) {
 
 // RestoreSessions automatically restores all previously active sessions
 func (m *Manager) RestoreSessions() error {
+	fmt.Print("~ Restoring Sessions")
 	metadata, err := loadSessionMetadata()
 	if err != nil {
 		return fmt.Errorf("failed to load session metadata: %w", err)

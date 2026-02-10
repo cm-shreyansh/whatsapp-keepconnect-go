@@ -57,6 +57,9 @@ func main() {
 	// Start periodic metadata saving (every 5 minutes)
 	waManager.StartMetadataSaver(5 * time.Minute)
 
+	//Restore saved sessions on starting of server
+	waManager.RestoreSessions()
+
 	// Update chatbot service with the WhatsApp manager
 	chatbotService = service.NewChatbotService(chatbotRepo, optionRepo, conversationRepo, userRepo, waManager)
 	messageService := service.NewMessageService(waManager)
