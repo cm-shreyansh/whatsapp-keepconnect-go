@@ -23,6 +23,7 @@ import (
 
 func main() {
 	// Load configuration
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
@@ -54,11 +55,11 @@ func main() {
 		log.Fatalf("Failed to initialize WhatsApp manager: %v", err)
 	}
 
+	// //Restore saved sessions on starting of server
+	// waManager.RestoreSessions()
+
 	// Start periodic metadata saving (every 5 minutes)
 	waManager.StartMetadataSaver(5 * time.Minute)
-
-	//Restore saved sessions on starting of server
-	waManager.RestoreSessions()
 
 	// Update chatbot service with the WhatsApp manager
 	chatbotService = service.NewChatbotService(chatbotRepo, optionRepo, conversationRepo, userRepo, waManager)

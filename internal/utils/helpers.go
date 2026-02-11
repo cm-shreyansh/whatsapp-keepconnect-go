@@ -16,15 +16,15 @@ func GenerateID(prefix string) string {
 
 // IsGreeting checks if a message is a greeting
 func IsGreeting(message string) bool {
-	greetings := []string{"hi", "hello", "hey", "hii", "hiii", "hiiii", "helo", "hola"}
+	greetings := []string{"hi", "hello", "hey", "hii", "hiii", "hiiii", "hiiii", "helo", "hola", "help"}
 	normalized := strings.ToLower(strings.TrimSpace(message))
-	
+
 	for _, greeting := range greetings {
 		if normalized == greeting {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -68,16 +68,16 @@ func SafeString(s *string) string {
 // ValidateRequired checks if required fields are present
 func ValidateRequired(fields map[string]string) error {
 	missing := []string{}
-	
+
 	for name, value := range fields {
 		if strings.TrimSpace(value) == "" {
 			missing = append(missing, name)
 		}
 	}
-	
+
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required fields: %s", strings.Join(missing, ", "))
 	}
-	
+
 	return nil
 }

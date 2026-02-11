@@ -87,7 +87,7 @@ func (s *ChatbotService) HandleIncomingMessage(userID string, messageEvt interfa
 		log.Printf("WhatsApp client not found for user %s", userID)
 		return
 	}
-
+	fmt.Print("~ Recieved Message - " + messageBody)
 	// Check if it's a greeting
 	if utils.IsGreeting(messageBody) {
 		s.handleGreeting(chatbot, chatID, clientData)

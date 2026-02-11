@@ -208,6 +208,8 @@ func NewManager(dbPath string, handler EventHandler) (*Manager, error) {
 		return nil, fmt.Errorf("failed to get database instance: %w", err)
 	}
 
+	fmt.Print("~ Creating Container DUde\n")
+
 	// Create store container
 	container := sqlstore.NewWithDB(sqlDB, "sqlite3", waLog.Noop)
 	if err := container.Upgrade(context.Background()); err != nil {
@@ -220,6 +222,7 @@ func NewManager(dbPath string, handler EventHandler) (*Manager, error) {
 		eventHandler: handler,
 	}
 
+	log.Printf("~ We are here")
 	// Auto-restore previous sessions
 	if err := manager.RestoreSessions(); err != nil {
 		log.Printf("Warning: failed to restore sessions: %v", err)
@@ -283,6 +286,10 @@ func (m *Manager) setupEventHandlers(userID string, clientData *ClientData) {
 			clientData.SetStatus(StatusDisconnected)
 
 		case *events.Connected:
+			// Save metadata when connection is established
+			if err := m.SaveSessionMetadata(); err != nil {
+				log.Printf("Warning: failed to save metadata on connect: %v", err)
+			}
 			clientData.SetStatus(StatusReady)
 
 		case *events.Disconnected:
@@ -381,6 +388,11 @@ func (m *Manager) InitializeClient(userID string) (*ClientData, error) {
 			return nil, fmt.Errorf("failed to connect: %w", err)
 		}
 		clientData.SetStatus(StatusReady)
+
+		// Save metadata after successful reconnection
+		if err := m.SaveSessionMetadata(); err != nil {
+			log.Printf("Warning: failed to save metadata: %v", err)
+		}
 		return clientData, nil
 	}
 
@@ -452,6 +464,10 @@ func (m *Manager) handleQREvents(userID string, clientData *ClientData, qrChan <
 		case "success":
 			log.Printf("🎉 QR code scanned successfully for user %s", userID)
 			clientData.SetStatus(StatusAuthenticated)
+			// Save metadata immediately after successful authentication
+			if err := m.SaveSessionMetadata(); err != nil {
+				log.Printf("Warning: failed to save metadata after QR scan: %v", err)
+			}
 			clientData.SetQRCode("") // Clear QR code
 
 		case "timeout":
@@ -653,6 +669,7 @@ func (cd *ClientData) SendMediaMessage(phone, mediaURL, caption string) (string,
 
 type SessionMetadata struct {
 	UserID       string    `json:"user_id"`
+	PhoneJID     string    `json:"phone_jid"`
 	LastActivity time.Time `json:"last_activity"`
 	Status       string    `json:"status"`
 }
@@ -664,8 +681,15 @@ func (m *Manager) SaveSessionMetadata() error {
 
 	metadata := make([]SessionMetadata, 0, len(m.clients))
 	for userID, clientData := range m.clients {
+		// Get the WhatsApp JID if device is logged in
+		phoneJID := ""
+		if clientData.Client.Store.ID != nil {
+			phoneJID = clientData.Client.Store.ID.String()
+		}
+
 		metadata = append(metadata, SessionMetadata{
 			UserID:       userID,
+			PhoneJID:     phoneJID,
 			LastActivity: time.Now(),
 			Status:       string(clientData.GetStatus()),
 		})
@@ -705,18 +729,17 @@ func loadSessionMetadata() ([]SessionMetadata, error) {
 
 // RestoreSessions automatically restores all previously active sessions
 func (m *Manager) RestoreSessions() error {
-	fmt.Print("~ Restoring Sessions")
 	metadata, err := loadSessionMetadata()
 	if err != nil {
 		return fmt.Errorf("failed to load session metadata: %w", err)
 	}
 
-	if metadata == nil {
+	if len(metadata) == 0 {
 		log.Println("No previous sessions to restore")
 		return nil
 	}
 
-	log.Printf("Restoring %d previous sessions...", len(metadata))
+	log.Printf("Found %d sessions to restore...", len(metadata))
 
 	// Get all devices from whatsmeow store
 	devices, err := m.container.GetAllDevices(context.Background())
@@ -724,22 +747,51 @@ func (m *Manager) RestoreSessions() error {
 		return fmt.Errorf("failed to get devices: %w", err)
 	}
 
-	// Create a map of device IDs for quick lookup
+	if len(devices) == 0 {
+		log.Println("No devices found in whatsmeow store")
+		return nil
+	}
+
+	log.Printf("Found %d devices in whatsmeow store", len(devices))
+
+	// Create a map: phoneJID -> device
 	deviceMap := make(map[string]*store.Device)
 	for _, device := range devices {
 		if device.ID != nil {
-			// Use the JID as the user identifier
-			userID := device.ID.User
-			deviceMap[userID] = device
+			jid := device.ID.String()
+			deviceMap[jid] = device
+			log.Printf("Device in store: %s", jid)
 		}
 	}
 
 	restored := 0
+	skipped := 0
+
 	for _, meta := range metadata {
-		// Check if device still exists in store
-		device, exists := deviceMap[meta.UserID]
+		log.Printf("Attempting to restore session for user: %s (JID: %s)", meta.UserID, meta.PhoneJID)
+
+		// Skip if no phone JID recorded
+		if meta.PhoneJID == "" {
+			log.Printf("⚠️  Skipping user %s - no phone JID in metadata", meta.UserID)
+			skipped++
+			continue
+		}
+
+		// Check if device exists in store
+		device, exists := deviceMap[meta.PhoneJID]
 		if !exists {
-			log.Printf("Skipping session for %s - device not found in store", meta.UserID)
+			log.Printf("⚠️  Skipping user %s - device %s not found in whatsmeow store", meta.UserID, meta.PhoneJID)
+			skipped++
+			continue
+		}
+
+		// Check if session already exists in memory
+		m.mu.RLock()
+		_, alreadyExists := m.clients[meta.UserID]
+		m.mu.RUnlock()
+
+		if alreadyExists {
+			log.Printf("⚠️  Session for user %s already exists in memory", meta.UserID)
 			continue
 		}
 
@@ -755,24 +807,118 @@ func (m *Manager) RestoreSessions() error {
 		// Set up event handlers
 		m.setupEventHandlers(meta.UserID, clientData)
 
-		// Add to clients map
+		// Add to clients map BEFORE connecting
 		m.mu.Lock()
 		m.clients[meta.UserID] = clientData
 		m.mu.Unlock()
 
 		// Connect to WhatsApp
+		log.Printf("Connecting to WhatsApp for user %s...", meta.UserID)
 		if err := client.Connect(); err != nil {
-			log.Printf("Failed to restore session for %s: %v", meta.UserID, err)
+			log.Printf("❌ Failed to connect for user %s: %v", meta.UserID, err)
+
+			// Remove from map on failure
+			m.mu.Lock()
+			delete(m.clients, meta.UserID)
+			m.mu.Unlock()
+
+			skipped++
 			continue
 		}
 
-		restored++
-		log.Printf("✅ Restored session for user %s", meta.UserID)
+		// Wait a bit for connection to establish
+		time.Sleep(500 * time.Millisecond)
+
+		// Check if connected successfully
+		if client.IsConnected() {
+			clientData.SetStatus(StatusReady)
+			restored++
+			log.Printf("✅ Successfully restored session for user %s (JID: %s)", meta.UserID, meta.PhoneJID)
+		} else {
+			log.Printf("⚠️  Connected but not ready for user %s", meta.UserID)
+			restored++ // Still count as restored, might become ready later
+		}
 	}
 
-	log.Printf("Successfully restored %d/%d sessions", restored, len(metadata))
+	log.Printf("📊 Session restoration complete: %d restored, %d skipped, %d total", restored, skipped, len(metadata))
+
+	if restored == 0 && len(metadata) > 0 {
+		log.Println("⚠️  WARNING: No sessions were restored. Check logs above for details.")
+	}
+
 	return nil
 }
+
+// // RestoreSessions automatically restores all previously active sessions
+// func (m *Manager) RestoreSessions() error {
+// 	log.Printf("~ Restoring Sessions")
+// 	metadata, err := loadSessionMetadata()
+// 	if err != nil {
+// 		return fmt.Errorf("failed to load session metadata: %w", err)
+// 	}
+
+// 	if metadata == nil {
+// 		log.Println("No previous sessions to restore")
+// 		return nil
+// 	}
+
+// 	log.Printf("Restoring %d previous sessions...", len(metadata))
+
+// 	// Get all devices from whatsmeow store
+// 	devices, err := m.container.GetAllDevices(context.Background())
+// 	if err != nil {
+// 		return fmt.Errorf("failed to get devices: %w", err)
+// 	}
+
+// 	// Create a map of device IDs for quick lookup
+// 	deviceMap := make(map[string]*store.Device)
+// 	for _, device := range devices {
+// 		if device.ID != nil {
+// 			// Use the JID as the user identifier
+// 			userID := device.ID.User
+// 			deviceMap[userID] = device
+// 		}
+// 	}
+
+// 	restored := 0
+// 	for _, meta := range metadata {
+// 		// Check if device still exists in store
+// 		device, exists := deviceMap[meta.UserID]
+// 		if !exists {
+// 			log.Printf("Skipping session for %s - device not found in store", meta.UserID)
+// 			continue
+// 		}
+
+// 		// Create WhatsApp client with existing device
+// 		client := whatsmeow.NewClient(device, waLog.Noop)
+
+// 		clientData := &ClientData{
+// 			Client:    client,
+// 			Container: m.container,
+// 		}
+// 		clientData.SetStatus(StatusInitializing)
+
+// 		// Set up event handlers
+// 		m.setupEventHandlers(meta.UserID, clientData)
+
+// 		// Add to clients map
+// 		m.mu.Lock()
+// 		m.clients[meta.UserID] = clientData
+// 		m.mu.Unlock()
+
+// 		// Connect to WhatsApp
+// 		if err := client.Connect(); err != nil {
+// 			log.Printf("Failed to restore session for %s: %v", meta.UserID, err)
+// 			continue
+// 		}
+
+// 		restored++
+// 		log.Printf("✅ Restored session for user %s", meta.UserID)
+// 	}
+
+// 	log.Printf("Successfully restored %d/%d sessions", restored, len(metadata))
+// 	return nil
+// }
 
 // StartMetadataSaver starts a background goroutine to periodically save metadata
 func (m *Manager) StartMetadataSaver(interval time.Duration) {

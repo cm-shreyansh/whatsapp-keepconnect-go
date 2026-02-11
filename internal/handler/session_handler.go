@@ -69,13 +69,6 @@ func (h *SessionHandler) GetQRCode(c *fiber.Ctx) error {
 	qrCode := clientData.GetQRCode()
 	status := clientData.GetStatus()
 
-	if qrCode == "" || qrCode == "undefined" {
-		return c.JSON(fiber.Map{
-			"status":  status,
-			"message": "QR code not available yet or already authenticated",
-		})
-	}
-
 	if status == "auth_failed" {
 		if err := h.waManager.RegenerateQR(userID); err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -83,6 +76,13 @@ func (h *SessionHandler) GetQRCode(c *fiber.Ctx) error {
 				"details": err.Error(),
 			})
 		}
+	}
+
+	if qrCode == "" || qrCode == "undefined" {
+		return c.JSON(fiber.Map{
+			"status":  status,
+			"message": "QR code not available yet or already authenticated",
+		})
 	}
 
 	return c.JSON(fiber.Map{
