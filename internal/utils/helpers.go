@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -16,16 +17,11 @@ func GenerateID(prefix string) string {
 
 // IsGreeting checks if a message is a greeting
 func IsGreeting(message string) bool {
+	fmt.Println("GREETINGS BROOOOOOO")
 	greetings := []string{"hi", "hello", "hey", "hii", "hiii", "hiiii", "hiiii", "helo", "hola", "help"}
 	normalized := strings.ToLower(strings.TrimSpace(message))
-
-	for _, greeting := range greetings {
-		if normalized == greeting {
-			return true
-		}
-	}
-
-	return false
+	fmt.Print("\n Greetings \n")
+	return slices.Contains(greetings, normalized)
 }
 
 // FormatPhoneNumber formats a phone number to WhatsApp JID format

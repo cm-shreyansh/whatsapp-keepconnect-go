@@ -5,23 +5,26 @@ import (
 	"time"
 
 	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/config"
+	"github.com/cm-shreyansh/whatsapp-keepconnect-go/internal/repository"
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
 )
 
 type Claims struct {
-	UserID    uint   `json:"user_id"`
+	// UserID    uint   `json:"user_id"`
 	ChatbotID string `json:"chatbot_id"`
 	jwt.RegisteredClaims
 }
 
 type AuthMiddleware struct {
 	jwtSecret string
+	userRepo  repository.UserRepository
 }
 
-func NewAuthMiddleware(cfg *config.Config) *AuthMiddleware {
+func NewAuthMiddleware(cfg *config.Config, userRepo repository.UserRepository) *AuthMiddleware {
 	return &AuthMiddleware{
 		jwtSecret: cfg.JWT.Secret,
+		userRepo:  userRepo,
 	}
 }
 
@@ -64,9 +67,17 @@ func (am *AuthMiddleware) Auth(c *fiber.Ctx) error {
 		})
 	}
 
+	user, error := am.userRepo.FindByID(claims.UserID)
+	if error != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "User not found",
+		})
+	}
+
 	// Add user info to context
-	c.Locals("user_id", claims.UserID)
-	c.Locals("chatbot_id", claims.ChatbotID)
+	userId, err := claims.GetSubject()
+	c.Locals("user_id", userId)
+	c.Locals("chatbot_id", user.ChatbotID)
 
 	return c.Next()
 }

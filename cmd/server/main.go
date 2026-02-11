@@ -71,7 +71,7 @@ func main() {
 	chatbotHandler := handler.NewChatbotHandler(chatbotRepo, optionRepo, userRepo, db)
 
 	// Initialize middleware
-	authMiddleware := middleware.NewAuthMiddleware(cfg)
+	authMiddleware := middleware.NewAuthMiddleware(cfg, userRepo)
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{

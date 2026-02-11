@@ -52,6 +52,8 @@ func (s *ChatbotService) HandleMessage(userID string, message interface{}) {
 // HandleIncomingMessage processes incoming WhatsApp messages for chatbot
 func (s *ChatbotService) HandleIncomingMessage(userID string, messageEvt interface{}) {
 	// Extract message event
+	log.Println("\n~ Incoming message")
+	fmt.Print("\n Yeaaa \n")
 	msgEvent, err := whatsmeow_client.ExtractMessageEvent(messageEvt)
 	if err != nil {
 		return // Not a message event
@@ -64,6 +66,9 @@ func (s *ChatbotService) HandleIncomingMessage(userID string, messageEvt interfa
 
 	chatID := msgEvent.From
 	messageBody := strings.TrimSpace(msgEvent.Body)
+	log.Println("\n~ " + messageBody + "\n")
+	fmt.Print("\n" + msgEvent.Body + "\n")
+	fmt.Print("\n" + msgEvent.From + "\n")
 
 	if messageBody == "" {
 		return
@@ -87,9 +92,13 @@ func (s *ChatbotService) HandleIncomingMessage(userID string, messageEvt interfa
 		log.Printf("WhatsApp client not found for user %s", userID)
 		return
 	}
-	fmt.Print("~ Recieved Message - " + messageBody)
+
+	// fmt.Print("\n Greetings boii \n")
 	// Check if it's a greeting
+	utils.IsGreeting(messageBody)
+	fmt.Print("THIS IS IT BREOOOOOO\n")
 	if utils.IsGreeting(messageBody) {
+		log.Printf("It is Greetings %s", userID)
 		s.handleGreeting(chatbot, chatID, clientData)
 		s.updateConversationState(userID, chatID)
 		return
